@@ -1,0 +1,356 @@
+---
+title: "Economic and Demographic Factors in CO2 Emissions"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      error = TRUE, fig.height = 4)
+library(tidyverse)
+library(kableExtra)
+library(dplyr)
+library(ggplot2)
+library(modelr)
+source("../scripts/viridis.R")
+source("../scripts/ggprob.R")
+```
+
+### Introduction
+> In this research project, we aim to explore the relationship between Gross Domestic Product (GDP) per capita, population size, continent region, and carbon dioxide (CO2) emissions across nations. Given the significant impact of CO2 emissions on global climate change, it is crucial to understand the economic and demographic factors that influence these emissions. Specifically, this study seeks to determine whether there are statistically significant differences in the mean CO2 emissions per capita between the 100 countries with the highest GDP per capita and the 100 countries with the lowest GDP per capita.
+
+> Additionally, we will explore the average CO2 emissions per capita in each continent and see if they are below the advised amount. According to The Nature Conservancy, the best way to prevent a 2℃  rise in global temperature is to reduce the average global carbon footprint to less than 2 tons per person per year by 2050 (nature.org). After initially exploring the data, we can see that the average CO2 emissions per capita vary between continents. We will use confidence intervals to understand the average CO2 emissions per person in 2015-2020. We are specifically interested to see if the continents are below the recommended threshold of 2 tons per person. (https://www.nature.org/en-us/get-involved/how-to-help/carbon-footprint-calculator/)
+
+> Finally, we will investigate if a country's GDP per capita and its population size can predict its CO2 emissions per capita using statistical analysis methods suitable for our data. This approach will help elucidate the complex interactions between economic development and environmental impact. The findings from this study are expected to provide valuable insights that could inform policy decisions targeted at mitigating climate change, thus contributing to the ongoing discussions in environmental economics and sustainable development.
+
+
+### Background
+> Greenhouse gas emissions are a critical driver of global warming and climate change, trapping the Sun's heat within the Earth's atmosphere and pushing global temperatures to unsustainable levels. The four principal greenhouse gases are carbon dioxide (CO2), methane, nitrous oxide, and fluorinated gases. Of these, CO2 is the predominant gas emitted through human activities, primarily from the combustion of fossil fuels for electricity, heat, and transportation. The burning of coal, oil, and gas not only releases a significant amount of CO2, but also emits nitrogen oxides into the atmosphere, exacerbating the greenhouse effect.
+
+> Gross Domestic Product (GDP) per capita is a key economic indicator that assesses the total value of all goods and services produced within a country over a given period, adjusted for population size. It provides insight into the overall economic performance and the average income per person, but does not account for disparities in income distribution.
+
+> In this project, we aim to explore the correlations between CO2 emissions, GDP per capita, and population sizes across different countries using data sourced from the World Bank. The World Bank is an organization committed to providing open data and supporting global efforts to reduce poverty. The data for this study has been compiled from the statistical systems of its member countries and is accessible through the World Bank's World Development Indicators database, available at: https://databank.worldbank.org/source/world-development-indicators
+
+> Our analysis utilizes two primary datasets. The first dataset details the carbon dioxide emissions and GDP per capita for each country, while the second dataset provides information on the total population of each country. We have chosen to focus on the most recent data available, covering the years 2015 to 2022. The variables under study include CO2 emissions (in metric tons per capita), GDP per capita (in current US dollars), total population, and the year.
+
+> A third dataset was used to categorize the country into different continents found here: https://www.thespreadsheetguru.com/list-countries-capitals-abbreviations/
+
+> While cleaning the data, we dropped rows that did not have information for GDP per capita or CO2 emissions per capita. Because of this, countries that did not have this information may have been omitted in our analysis.  
+
+> This research aims to shed light on how economic development and population trends are linked to environmental impacts, specifically through the lens of carbon emissions. The findings from this study will offer valuable insights for policymakers and environmental advocates seeking to balance economic growth with sustainable environmental practices.
+
+
+```{r, include=FALSE}
+#### Importing Data and Data Cleaning
+# import and clean co2 and gdp data
+co2_gdp_data = read.csv("co2_vs_gdp_per_capita.csv")
+co2_gdp_data = co2_gdp_data %>% 
+    rename(
+  country = `Country.Name`,
+  country_code = `Country.Code`,
+  series = `Series.Name`,
+  code = `Series.Code`,
+  `2015` = `X2015..YR2015.`,
+  `2016` = `X2016..YR2016.`,
+  `2017` = `X2017..YR2017.`,
+  `2018` = `X2018..YR2018.`,
+  `2019` = `X2019..YR2019.`,
+  `2020` = `X2020..YR2020.`,
+  `2021` = `X2021..YR2021.`,
+  `2022` = `X2022..YR2022.`
+  ) %>% 
+  pivot_longer(cols = c(`2015`,`2016`,`2017`,`2018`,`2019`,`2020`,`2021`,`2022`),
+               names_to = "year",
+               values_to = "n") %>% 
+  mutate(n = na_if(n, "..")) %>% 
+  select(country,country_code,series,year,n) %>% 
+  mutate(series = case_when(series == "GDP per capita (current US$)" ~ "gdp_per_capita", 
+                            series == "CO2 emissions (metric tons per capita)" ~ "co2_per_capita")) %>% 
+  pivot_wider(names_from = series, values_from = n) %>% 
+  drop_na(gdp_per_capita) %>% 
+  drop_na(co2_per_capita) %>% 
+  mutate(gdp_per_capita = as.numeric(unlist(gdp_per_capita)),
+         co2_per_capita = as.numeric(unlist(co2_per_capita))) %>% 
+  select(country, country_code, year, gdp_per_capita, co2_per_capita) %>% 
+  filter(!is.na(gdp_per_capita)) %>% 
+  filter(!is.na(co2_per_capita))
+```
+
+```{r, include=FALSE}
+# import and clean population data
+population_data = read.csv("total_population_by_country_2015_to_2022.csv")
+
+population_data = population_data %>% 
+  select(-Country.Code, -Series.Name, -Series.Code) %>% 
+  rename(`2015` = `X2015..YR2015.`,
+         `2016` = `X2016..YR2016.`,
+         `2017` = `X2017..YR2017.`,
+         `2018` = `X2018..YR2018.`,
+         `2019` = `X2019..YR2019.`,
+         `2020` = `X2020..YR2020.`,
+         `2021` = `X2021..YR2021.`,
+         `2022` = `X2022..YR2022.`)
+
+population_data = population_data %>% 
+  rename(country = Country.Name) %>% 
+  pivot_longer(cols = starts_with("20"), names_to = "year", values_to = "population")
+```
+
+```{r, include=FALSE}
+# joining popuation_data and c02_gdp_data 
+pop_co2_gdp = co2_gdp_data %>% 
+  left_join(population_data)
+```
+
+```{r, include=FALSE}
+# Removing any data points that are not countries (i.e. world), adding continent column, and adding total_co2 column
+country_data = read.csv("WorldCountriesList.csv")
+
+valid_countries = country_data$Abreviation
+
+data = pop_co2_gdp %>% 
+  filter(country_code %in% valid_countries) %>% 
+  mutate(continent = country_data$Continent[match(country_code, country_data$Abreviation)]) %>% 
+  mutate(population = as.numeric(population)) %>% 
+  mutate(total_co2 = population *co2_per_capita, total_gdp = population*gdp_per_capita) %>% 
+  select(country, country_code, continent, year, population, gdp_per_capita, total_gdp, co2_per_capita, total_co2)
+head(data)
+```
+
+```{r, include=FALSE}
+#### Summary Table of Data
+# Create summary table showing countries with their mean GDP and mean CO2 per capita
+summary_co2_gdp_data = data %>% 
+  group_by(country) %>% 
+  mutate(mean_gdp_per_capita = mean(gdp_per_capita), mean_co2_per_capita = mean(co2_per_capita)) %>% 
+  select(country, mean_gdp_per_capita, mean_co2_per_capita) %>% 
+  distinct()
+head(summary_co2_gdp_data)
+```
+
+### Analysis
+
+#### Hypothesis Test
+- Compare the mean CO2 Emissions for the 100 highest average GDP Countries vs the 10 lowest average GDP countries for a specific year (2018).
+
+> Is there a statistically significant difference between the mean CO2 emissions when looking at the 100 lowest vs the 100 highest average GDP's in 2018.
+
+> Let $X_i$ for $i$=1…n1 be the average CO2 Emissions in 2018 for the countries with the highest 100 average GDPs in 2018.
+
+> Let $Y_i$ for $i$=1…n1 be the average CO2 Emissions in 2018 for the countries with the lowest 100 average GDPs in 2018.
+
+> Let $\mu_x$ and $\sigma_x$ be the true average and standard deviation of the true distribution $D_x$ of the highest GDP group. 
+
+> Let $\mu_y$ and $\sigma_y$ be the true average and standard deviation of the true distribution $D_y$ of the lowest GDP group
+
+> Hypothesis 
+$$
+H_0: \mu(x) = \mu(y)\\
+H_a: \mu(x) \neq \mu(y) 
+$$
+
+> Using a t-test for difference in means. Including var.equal = TRUE to assume the means are the same for the highest GDPs vs the lowest GDPs
+
+```{r, include=FALSE}
+highest_gdp = data %>% 
+  filter(year == 2018) %>% 
+  slice_max(gdp_per_capita, n = 100) %>% 
+  mutate(gdp = 'Highest GDP per Capita')
+
+lowest_gdp = data %>% 
+  filter(year == 2018) %>% 
+  slice_min(gdp_per_capita, n = 100) %>% 
+  mutate(gdp = "Lowest GDP per Capita")
+```
+
+```{r, include=FALSE}
+highest_co2 = highest_gdp$co2_per_capita
+lowest_co2 = lowest_gdp$co2_per_capita
+t.test(highest_co2, lowest_co2, var.equal = TRUE)
+```
+> (p-value < 2.2e-16, 2 sample t-test) We reject the null hypothesis because p < 2.2e-16 < 0.05. We have strong evidence to reject the null hypothesis that there is not statistically significant difference between the mean CO2 emissions when looking at the 100 lowest vs the 100 highest average GDP's in 2018.
+
+
+#### Plotting the highest vs the lowest GDP per capita:
+```{r, echo=FALSE}
+highest_vs_lowest = highest_gdp %>% 
+  full_join(lowest_gdp) 
+  
+highest_vs_lowest %>% 
+  ggplot(aes(x = co2_per_capita)) +
+  geom_boxplot() +
+  facet_grid(vars(gdp)) +
+  theme_minimal() + 
+  theme(axis.text.y = element_blank()) +
+  labs(title= "CO2 Emissions Per Capita for Countries with 100 Highest / 100 Lowest GDPs",
+       subtitle = "2018",
+       x = "CO2 Emissions Per Capita (Metric Tons)",
+       )
+```
+
+
+#### Confidence Intervals
+
+```{r, include=FALSE}
+# initial exploration 
+graphing_data = data %>% 
+  group_by(continent) %>% 
+  mutate(avg_co2_per_capita = mean(co2_per_capita)) %>% 
+  ungroup() %>% 
+  mutate(continent = reorder(continent, -avg_co2_per_capita))
+
+ggplot(graphing_data, aes(x = continent, y = avg_co2_per_capita)) +
+  geom_col(position = "dodge") +
+  labs(title = "Average CO2 Emissions per Capita Across Continents", x = "Continent", y = "Average CO2 Emissions per Capita (Metric Tons)") +
+  theme_minimal()
+
+# After initially exploring the data, we can see that the average CO2 emissions per capita vary between continents. For example, Africa's average CO2 emissions already appear less than 2 tons per person per year, however in continents like Europe and Asia, the average CO2 emissions seem to be above 2 tons per year
+```
+
+> We are going to use confidence intervals to find the average CO2 emissions per capita to get a better idea of each continent's typical CO2 emissions per person. 
+
+```{r, include=FALSE}
+#Africa Confidence interval
+africa = data %>% 
+  filter(continent == "Africa")
+t.test(africa$co2_per_capita)$conf
+
+africa_co2_mean = t.test(africa$co2_per_capita)$estimate
+africa_co2_mean
+
+
+```
+> We are 95% confident that between 2015 and 2020, the average CO2 emissions per person annually in Africa ranged from 0.979 to 1.374 tons.
+
+
+
+```{r, include=FALSE}
+#Asia Confidence interval
+asia = data %>% 
+  filter(continent == "Asia")
+t.test(asia$co2_per_capita)$conf
+
+asia_co2_mean = t.test(asia$co2_per_capita)$estimate
+asia_co2_mean
+```
+> We are 95% confident that between 2015 and 2020, the average CO2 emissions per person annually in Asia ranged from 5.525 to 7.228 tons.
+
+
+
+```{r, include=FALSE}
+#Australia Confidence interval
+australia = data %>% 
+  filter(continent == "Australia")
+t.test(australia$co2_per_capita)$conf
+
+australia_co2_mean = t.test(australia$co2_per_capita)$estimate
+australia_co2_mean
+```
+> We are 95% confident that between 2015 and 2020, the average CO2 emissions per person annually in Australia ranged from 2.528 to 4.508 tons.
+
+
+
+```{r, include=FALSE}
+#Europe Confidence interval
+europe = data %>% 
+  filter(continent == "Europe")
+t.test(europe$co2_per_capita)$conf
+
+europe_co2_mean = t.test(europe$co2_per_capita)$estimate
+europe_co2_mean
+```
+> We are 95% confident that between 2015 and 2020, the average CO2 emissions per person annually in Europe ranged from 5.708 to 6.360 tons.
+
+
+
+```{r, include=FALSE}
+#North America Confidence interval
+n_america = data %>% 
+  filter(continent == "N. America")
+t.test(n_america$co2_per_capita)$conf
+
+na_co2_mean = t.test(n_america$co2_per_capita)$estimate
+na_co2_mean
+```
+> We are 95% confident that between 2015 and 2020, the average CO2 emissions per person annually in North America ranged from 3.386 to 4.788 tons.
+
+
+
+```{r, include=FALSE}
+#South America Confidence interval
+s_america = data %>% 
+  filter(continent == "S. America")
+t.test(s_america$co2_per_capita)$conf
+
+sa_co2_mean = t.test(s_america$co2_per_capita)$estimate
+sa_co2_mean
+```
+> We are 95% confident that between 2015 and 2020, the average CO2 emissions per person annually in South America ranged from 2.337 to 2.921 tons.
+
+#### Plotting Confidence Intervals
+
+```{r, echo=FALSE}
+ci_data = data.frame(x = 1:6, 
+                     mean = c(1.176258, 6.376866, 3.517979, 6.033605, 4.087083, 2.629131),
+                     lower_ci = c(0.9789508, 5.525245, 2.527627, 5.707585, 3.386250, 2.336594),
+                     upper_ci = c(1.3735652, 7.228487, 4.508331, 6.359625, 4.787917, 2.921668))
+
+ggplot(ci_data, aes(x = x, y = mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.1) +
+  labs(title = "Confidence Interval of Mean CO2 Emissions per Capita", x = "X-axis", y = "CO2 Emissions per Capita") +
+  scale_x_discrete(name = "Continent", limits = c("Africa", "Asia", "Australia", "Europe", "North America", "South America")) +
+  theme_minimal()
+```
+
+> Since the correlation coefficient is not close to 1 (0.51998), GDP per capita and CO2 emissions per capita are not strongly positively correlated. 
+
+
+```{r, include=FALSE}
+data_lm = lm(gdp_per_capita ~ co2_per_capita, data = data)
+data_cf = coef(data_lm)
+data_cf
+```
+
+```{r, include=FALSE}
+summary(data_lm)
+```
+> The estimated intercept is 4624.5 and the estimated slope is 2342.7.
+
+```{r, echo=FALSE}
+ggplot(data, aes(x = gdp_per_capita, y = co2_per_capita)) +
+  geom_point() +
+  geom_smooth(se = FALSE, method = "lm") +
+    labs(title = "Actual vs. Predicted",
+       x = "GDP per Capita",
+       y = "CO2 Emissions per Capita")
+```
+
+```{r, echo=FALSE}
+df0 = data  %>% 
+  add_residuals(data_lm) %>% 
+  add_predictions(data_lm)
+
+ggplot(df0, aes(x = gdp_per_capita, y = resid)) +
+  geom_point() +
+  labs(
+    title = "Residual Plot",
+    x = ("GDP per Capita"),
+    y = ("Resdiuals")
+  ) +
+  geom_hline(aes(yintercept=0), color="red", linetype = "dashed") + 
+  geom_smooth(se = FALSE)
+```
+
+
+> After creating and graphing a simple linear regression model and plotting its residuals, it is clear that this model is not a good fit for this data. On the Actual vs. Predicted plot, the data points are not linear and our regression model (the blue line) is not good at estimating the CO2 emissions per capita. On the Residual Plot,there is a pattern and the residuals are not spread randomly about y = 0 (the red dashed line). There seems to be a pattern where the the residuals increase as GDP per Capita increases. Additionally, the geom_smooth line shows an increasing curve, proving the pattern and showing that the plots are not a linear horizontal line. These are all reasons that suggest that a linear regression model is not a good fit for the data. 
+
+### Discussion
+> In our analysis, we found that a well-fitting linear correlation between a country's GDP per capita and CO2 emissions per capita was not apparent. However, we did identify a statistically significant difference between the top 100 and bottom 100 countries by GDP per capita. When observing our graph, it's clear that countries with lower GDP per capita had significantly lower CO2 emissions per capita in 2018. 
+
+> We also examined CO2 emissions per capita by creating a 95% confidence interval for the average CO2 emissions per capita across continents. The Nature Conservancy, recommends that CO2 emissions per capita should be less than 2 in order to combat climate change. In our analysis, we explored if each continent's CO2 emissions per capita were below this threshold. Notably, Africa was the only continent with average CO2 emissions below 2 tons per person, which is favorable for combating climate change. In contrast, all other continents—Asia, Australia, Europe, North America, and South America—had confidence intervals exceeding 2 tons per person.
+
+> Regarding our research question, it is evident that most continents have average CO2 emissions per person higher than the recommended amount. This suggests that most continents need to reduce their CO2 emissions per capita to address global warming effectively.
+
+> An alternative approach to this question could involve a hypothesis test to assess whether the average CO2 emissions equaled or exceeded 2 tons per person. For future work, we aim to find a better fitting model to compare CO2 emissions per capita to GDP per capita, exploring more complex models beyond basic linear regression.
+
+> Given the lack of a fitting linear regression, we cannot directly predict CO2 per capita using GDP per capita alone. However, we can make inferences based on continents and whether a country's GDP per capita is within the top 100 or bottom 100 globally.
